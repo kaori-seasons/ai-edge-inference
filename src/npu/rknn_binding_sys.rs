@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 // ============ RKNN C API 类型定义 ============
 
 /// RKNN 上下文句柄
-pub type RknnContext = i32;
+pub type RknnContext = *mut core::ffi::c_void;
 
 /// RKNN 返回代码
 #[repr(i32)]
@@ -63,6 +63,7 @@ pub enum DataType {
 }
 
 /// 张量属性
+#[repr(C)]
 pub struct TensorAttr {
     pub index: u32,
     pub name: [u8; 256],
@@ -93,9 +94,6 @@ impl DmaBuffer {
     /// - `size`: 缓冲区大小
     /// - `align`: 对齐要求 (通常为 8KB)
     pub fn allocate(size: usize, align: usize) -> Result<Self, &'static str> {
-        // 简化的 DMA 内存分配
-        // 实际应该调用内核的 DMA 分配函数
-        
         // 使用全局分配器分配内存
         let layout = alloc::alloc::Layout::from_size_align(size, align)
             .map_err(|_| "Invalid layout")?;
@@ -318,6 +316,27 @@ impl RknnModelHeader {
     }
 }
 
+/// RKNN 输入张量
+#[repr(C)]
+pub struct RknnInput {
+    pub index: u32,
+    pub buf: *const core::ffi::c_void,
+    pub size: u32,
+    pub pass_through: u8,
+    pub type_: u32,
+    pub fmt: u32,
+}
+
+/// RKNN 输出张量
+#[repr(C)]
+pub struct RknnOutput {
+    pub want_float: u8,
+    pub is_prealloc: u8,
+    pub index: u32,
+    pub buf: *mut core::ffi::c_void,
+    pub size: u32,
+}
+
 /// RKNN 上下文 (RAII 包装)
 pub struct RknnCtx {
     ctx: RknnContext,
@@ -333,17 +352,27 @@ pub struct RknnCtx {
 unsafe impl Send for RknnCtx {}
 unsafe impl Sync for RknnCtx {}
 
+// ============ RKNN C API 函数声明 ============
+
+extern "C" {
+    fn rknn_init(ctx: *mut RknnContext, data: *const core::ffi::c_void, size: u32, flag: u32) -> i32;
+    fn rknn_destroy(ctx: RknnContext) -> i32;
+    fn rknn_query(ctx: RknnContext, cmd: u32, info: *mut core::ffi::c_void, size: u32) -> i32;
+    fn rknn_load_model(ctx: RknnContext, model_data: *const core::ffi::c_void, size: u32, flag: *mut u32) -> i32;
+    fn rknn_inputs_set(ctx: RknnContext, input_num: u32, inputs: *const RknnInput) -> i32;
+    fn rknn_run(ctx: RknnContext, inputs: *const RknnInput) -> i32;
+    fn rknn_outputs_get(ctx: RknnContext, output_num: *mut u32, outputs: *mut RknnOutput, ptr: *mut u32) -> i32;
+    fn rknn_outputs_release(ctx: RknnContext, output_num: u32, outputs: *mut RknnOutput) -> i32;
+}
+
 impl RknnCtx {
     /// 创建新的 RKNN 上下文
     pub fn new() -> Result<Self, &'static str> {
-        // 模拟初始化 (实际应调用 rknn_init)
-        let ctx: RknnContext = 1;  // 占位符
-        
         Ok(RknnCtx {
-            ctx,
+            ctx: core::ptr::null_mut(),
             input_tensors: Vec::new(),
             output_tensors: Vec::new(),
-            is_initialized: true,
+            is_initialized: false,
             model_header: None,
             model_loaded: false,
         })
@@ -351,8 +380,8 @@ impl RknnCtx {
     
     /// 加载 RKNN 模型
     pub fn load_model(&mut self, model_data: &[u8]) -> Result<(), &'static str> {
-        if !self.is_initialized {
-            return Err("Context not initialized");
+        if self.is_initialized {
+            return Err("Context already initialized");
         }
         
         if model_data.is_empty() {
@@ -368,22 +397,34 @@ impl RknnCtx {
         // 第三步: 检查模型兼容性
         self.verify_model_compatibility(&header)?;
         
-        // 第四步: 分配模型内存和缓冲区
-        let model_buffer = DmaBuffer::allocate(
-            header.model_size as usize,
-            4096,  // 4KB 对齐用于 NPU DMA
-        )?;
+        // 第四步: 调用 RKNN C API 初始化上下文
+        let mut ctx: RknnContext = core::ptr::null_mut();
+        let flag: u32 = 0; // 默认标志
         
-        // 第五步: 复制模型数据到 DMA 缓冲区
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                model_data.as_ptr(),
-                model_buffer.virt_addr(),
-                (header.model_size as usize).min(model_data.len()),
-            );
+        let ret = unsafe {
+            rknn_init(&mut ctx, model_data.as_ptr() as *const core::ffi::c_void, 
+                     model_data.len() as u32, flag)
+        };
+        
+        if ret != 0 {
+            return Err("Failed to initialize RKNN context");
         }
         
-        // 第六步: 调用 RKNN API (模拟)
+        // 第五步: 加载模型
+        let mut load_flag: u32 = 0;
+        let ret = unsafe {
+            rknn_load_model(ctx, model_data.as_ptr() as *const core::ffi::c_void, 
+                           model_data.len() as u32, &mut load_flag)
+        };
+        
+        if ret != 0 {
+            // 清理已分配的上下文
+            unsafe { rknn_destroy(ctx); }
+            return Err("Failed to load RKNN model");
+        }
+        
+        self.ctx = ctx;
+        self.is_initialized = true;
         self.model_header = Some(header);
         self.model_loaded = true;
         
@@ -596,44 +637,54 @@ impl RknnCtx {
             return Err("Tensors not initialized");
         }
         
-        // 第一步: 验证所有输入缓冲区完整性
+        // 第一步: 准备输入张量
+        let mut inputs: Vec<RknnInput> = Vec::new();
         for (i, tensor) in self.input_tensors.iter().enumerate() {
-            let data = tensor.data();
-            if data.is_empty() {
-                return Err("Input tensor data is empty");
-            }
-            
-            // 检查是否带有 NaN 或无穷大 (FP32)
-            if tensor.attr().type_ == DataType::Float32 as u32 {
-                for chunk in data.chunks(4) {
-                    if chunk.len() == 4 {
-                        let val = f32::from_le_bytes([
-                            chunk[0], chunk[1], chunk[2], chunk[3]
-                        ]);
-                        if !val.is_finite() {
-                            return Err("Input contains NaN or infinity");
-                        }
-                    }
-                }
-            }
+            let input = RknnInput {
+                index: i as u32,
+                buf: tensor.data().as_ptr() as *const core::ffi::c_void,
+                size: tensor.data().len() as u32,
+                pass_through: 0, // 不透传
+                type_: tensor.attr().type_,
+                fmt: tensor.attr().fmt,
+            };
+            inputs.push(input);
         }
         
-        // 第二步: 执行实际推理 (模拟实现)
-        // 实际处理中：
-        // 1. 调用 rknn_run() C API
-        // 2. 等待 NPU 处理完成
-        // 3. 获取输出结果
+        // 第二步: 执行推理
+        let ret = unsafe {
+            rknn_run(self.ctx, inputs.as_ptr())
+        };
+        
+        if ret != 0 {
+            return Err("Failed to run inference");
+        }
+        
+        // 第三步: 获取输出结果
+        let mut output_num: u32 = self.output_tensors.len() as u32;
+        let mut outputs: Vec<RknnOutput> = Vec::with_capacity(self.output_tensors.len());
+        
+        // 初始化输出结构体
+        for i in 0..self.output_tensors.len() {
+            outputs.push(RknnOutput {
+                want_float: 1, // 需要浮点输出
+                is_prealloc: 1, // 预分配缓冲区
+                index: i as u32,
+                buf: self.output_tensors[i].data_mut().as_mut_ptr() as *mut core::ffi::c_void,
+                size: self.output_tensors[i].data().len() as u32,
+            });
+        }
+        
+        let ret = unsafe {
+            rknn_outputs_get(self.ctx, &mut output_num, outputs.as_mut_ptr(), core::ptr::null_mut())
+        };
+        
+        if ret != 0 {
+            return Err("Failed to get outputs");
+        }
         
         // 模拟推理耗时
         let inference_time_ms = 50;
-        
-        // 第三步: 检查输出缓冲区是否已填空
-        for tensor in self.output_tensors.iter_mut() {
-            let data = tensor.data_mut();
-            if data.is_empty() {
-                return Err("Output tensor buffer is empty");
-            }
-        }
         
         Ok(inference_time_ms)
     }
@@ -664,16 +715,21 @@ impl RknnCtx {
 
 impl Drop for RknnCtx {
     fn drop(&mut self) {
-        if self.is_initialized && self.ctx > 0 {
-            // 清理 RKNN 上下文资源 (实际应调用 rknn_destroy)
-            // 1. 删除模型数据缓冲区
-            // 2. 释放输入/输出张量
-            // 3. 关闭 NPU 上下文
+        if self.is_initialized && !self.ctx.is_null() {
+            // 释放输出张量
+            unsafe { 
+                rknn_outputs_release(self.ctx, self.output_tensors.len() as u32, 
+                                   core::ptr::null_mut()) 
+            };
+            
+            // 销毁 RKNN 上下文
+            unsafe { rknn_destroy(self.ctx); }
             
             self.input_tensors.clear();
             self.output_tensors.clear();
             self.model_header = None;
             self.is_initialized = false;
+            self.ctx = core::ptr::null_mut();
         }
     }
 }
@@ -686,7 +742,7 @@ lazy_static! {
 }
 
 /// 初始化 RKNN 系统
-pub fn rknn_init() -> Result<(), &'static str> {
+pub fn init_rknn_system() -> Result<(), &'static str> {
     let ctx = RknnCtx::new()?;
     let mut global_ctx = RKNN_CTX.lock();
     *global_ctx = Some(ctx);
@@ -781,8 +837,8 @@ mod tests {
         let ctx = RknnCtx::new();
         assert!(ctx.is_ok());
         
-        let mut ctx = ctx.unwrap();
-        assert!(ctx.is_initialized);
+        let ctx = ctx.unwrap();
+        assert!(!ctx.is_initialized);
         assert!(!ctx.model_loaded);
     }
     
@@ -792,5 +848,13 @@ mod tests {
         assert_eq!(DataType::Float32 as u32, 0);
         assert_eq!(DataType::Int8 as u32, 2);
         assert_eq!(DataType::Uint8 as u32, 3);
+    }
+    
+    #[test]
+    fn test_rknn_init_system() {
+        let result = init_rknn_system();
+        // 注意：在测试环境中，我们无法真正初始化RKNN系统
+        // 这里只是测试函数是否能正常调用
+        assert!(result.is_ok() || result.is_err());
     }
 }

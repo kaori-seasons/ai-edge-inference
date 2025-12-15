@@ -71,11 +71,11 @@ pub extern "C" fn main(dtb_ptr: u64) -> ! {
     
     // 9. 初始化RKNN NPU系统
     println!("[StarryOS] Initializing RKNN NPU system...");
-    match rknn_init() {
+    match init_rknn_system() {
         Ok(_) => println!("[StarryOS] RKNN system initialized"),
         Err(e) => println!("[StarryOS] RKNN init error: {}", e),
     }
-    
+
     // ============ 系统就绪 ============
     
     println!("[StarryOS] ================================");
