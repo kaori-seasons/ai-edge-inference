@@ -7,7 +7,6 @@
 //! - L3: PTE (Page Table Entry)
 
 use core::arch::asm;
-use volatile::Volatile;
 
 /// 页表项 (Page Table Entry)
 #[repr(transparent)]
@@ -79,28 +78,40 @@ impl Pte {
 /// 页表 (页对齐, 512个表项)
 #[repr(align(4096))]
 pub struct PageTable {
-    entries: [Volatile<Pte>; 512],
+    entries: [u64; 512],
 }
 
 impl PageTable {
     /// 创建新的页表
     pub const fn new() -> Self {
         PageTable {
-            entries: [Volatile::new(Pte(0)); 512],
+            entries: [0; 512],
         }
     }
     
-    /// 设置表项
+    /// 设置表项 (支持互敧预见转换于串序一致的内存)
     pub fn set(&mut self, index: usize, entry: Pte) {
         if index < 512 {
-            self.entries[index].write(entry);
+            // 使用volatile写入以确保不被优化器优化掉
+            unsafe {
+                core::ptr::write_volatile(
+                    &mut self.entries[index] as *mut u64,
+                    entry.0,
+                );
+            }
         }
     }
     
-    /// 获取表项
+    /// 获取表项 (支持转换于串序一致的内存)
     pub fn get(&self, index: usize) -> Pte {
         if index < 512 {
-            self.entries[index].read()
+            // 使用volatile读取以确保不被优化器优化掉
+            unsafe {
+                let val = core::ptr::read_volatile(
+                    &self.entries[index] as *const u64
+                );
+                Pte(val)
+            }
         } else {
             Pte(0)
         }

@@ -169,7 +169,7 @@ pub extern "C" fn main(dtb_ptr: u64) -> ! {
         let mut ctx_lock = RKNN_CTX.lock();
         if let Some(ref mut ctx) = *ctx_lock {
             // 模拟上MODEL_DATA是一个有效的RKNN模型
-            let dummy_model = b"RKNN\x00\x00\x00\x00";
+            let dummy_model: &[u8] = b"RKNN\x00\x00\x00\x00";
             match ctx.load_model(dummy_model) {
                 Ok(_) => println!("[StarryOS] Model loading PASSED"),
                 Err(e) => println!("[StarryOS] Model loading FAILED: {}", e),
@@ -541,8 +541,8 @@ mod kernel {
     static GLOBAL: SimpleAllocator = SimpleAllocator;
 }
 
+#[cfg(nightly)]
 #[alloc_error_handler]
 fn handle_alloc_error(_layout: core::alloc::Layout) -> ! {
-    println!("[Error] Memory allocation failed");
     panic!("Allocation error");
 }
