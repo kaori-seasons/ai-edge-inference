@@ -328,6 +328,11 @@ pub struct RknnCtx {
     model_loaded: bool,
 }
 
+// Safety: RknnCtx can be safely sent between threads
+// All pointers are managed internally and not shared
+unsafe impl Send for RknnCtx {}
+unsafe impl Sync for RknnCtx {}
+
 impl RknnCtx {
     /// 创建新的 RKNN 上下文
     pub fn new() -> Result<Self, &'static str> {

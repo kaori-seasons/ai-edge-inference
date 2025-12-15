@@ -75,7 +75,6 @@ lazy_static! {
 /// 我们通过发送SGI (Software Generated Interrupt)来唤醒其他核心
 pub fn start_cpu(cpu_id: u32) {
     if cpu_id >= 8 {
-        println!("[MultiCore] Invalid CPU ID: {}", cpu_id);
         return;
     }
     
@@ -91,7 +90,7 @@ pub fn start_cpu(cpu_id: u32) {
         gic.send_sgi(15, 1 << cpu_id);  // 只给指定CPU发送
     }
     
-    println!("[MultiCore] Starting CPU {}", cpu_id);
+    // Debug output suppressed in library mode
 }
 
 /// 启动所有A76核心 (保留ID 0作为主CPU)
@@ -135,7 +134,7 @@ pub fn wait_cpu_online(cpu_id: u32, timeout_ms: u32) -> bool {
         }
         
         if count == 0 {
-            println!("[MultiCore] CPU {} startup timeout", cpu_id);
+            // Timeout reached - debug output suppressed
             return false;
         }
         
@@ -151,9 +150,7 @@ pub fn wait_all_online(timeout_ms: u32) -> u32 {
     for id in 1..8 {
         if wait_cpu_online(id, timeout_ms) {
             online_count += 1;
-            println!("[MultiCore] CPU {} is now online", id);
         } else {
-            println!("[MultiCore] CPU {} failed to start", id);
         }
     }
     
@@ -244,9 +241,6 @@ pub fn handle_ipi(vector: u32, cpu_id: u32) {
 
 /// 多核初始化
 pub fn multicore_init() {
-    println!("[MultiCore] Initializing multi-core system...");
-    println!("[MultiCore] CPU 0 (main) is online");
-    
     // 标记CPU 0为在线
     CPU_INFO[0].set_state(CpuState::Online);
     
@@ -256,12 +250,8 @@ pub fn multicore_init() {
     // 等待所有CPU启动
     let online_count = wait_all_online(1000);
     
-    println!(
-        "[MultiCore] System online: {} CPUs ({} A76, {} A55)",
-        online_count,
-        get_a76_online_count(),
-        get_a55_online_count()
-    );
+    // Debug summary available via multicore functions
+    // println!("[MultiCore] System online: {} CPUs ...");
 }
 
 #[cfg(test)]

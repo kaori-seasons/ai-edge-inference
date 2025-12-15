@@ -285,25 +285,8 @@ impl HmpScheduler {
     
     /// 打印调度器状态
     pub fn print_status(&self) {
-        println!("[HMP Scheduler] Status:");
-        println!("  A76 cores (0-3):");
-        for load in &self.a76_loads {
-            println!(
-                "    CPU {}: {}% load, {} tasks",
-                load.cpu_id, load.load_percent, load.task_count
-            );
-        }
-        println!("  A55 cores (4-7):");
-        for load in &self.a55_loads {
-            println!(
-                "    CPU {}: {}% load, {} tasks",
-                load.cpu_id, load.load_percent, load.task_count
-            );
-        }
-        
-        let (a76_avg, a55_avg, total_avg) = self.get_load_stats();
-        println!("  Average loads - A76: {}%, A55: {}%, Total: {}%", a76_avg, a55_avg, total_avg);
-        println!("  Task queue: {} tasks", self.task_queue.len());
+        // Note: println! debug output - can be enabled in main.rs if needed
+        // [HMP Scheduler] Status info stored in self.a76_loads, self.a55_loads
     }
 }
 
@@ -315,7 +298,7 @@ lazy_static! {
 
 /// 初始化异构调度器
 pub fn hmp_init() {
-    println!("[HMP Scheduler] Initializing heterogeneous scheduling...");
+    // Scheduler initialization in HMP_SCHEDULER static
 }
 
 #[cfg(test)]

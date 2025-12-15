@@ -8,10 +8,3 @@ pub mod hal;
 pub mod kernel;
 pub mod npu;
 pub mod system;
-
-use core::panic::PanicInfo;
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    loop {}
-}

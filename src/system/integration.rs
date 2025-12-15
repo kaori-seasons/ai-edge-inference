@@ -7,6 +7,8 @@
 //! 4. 系统状态报告
 
 use alloc::vec::Vec;
+use alloc::format;
+use alloc::string::String;
 use core::fmt;
 
 /// 子系统类型

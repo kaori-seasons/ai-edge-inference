@@ -84,6 +84,18 @@ const GICR_SGI_ICFGR0: u64 = 0x100C00;
 /// GICR_SGI_ICFGR1: SGI/PPI配置
 const GICR_SGI_ICFGR1: u64 = 0x100C04;
 
+/// GICR_SGI_ISPENDR0: SGI/PPI待处理  
+const GICR_SGI_ISPENDR0: u64 = 0x100200;
+
+/// GICR_SGI_ICPENDR0: SGI/PPI待处理
+const GICR_SGI_ICPENDR0: u64 = 0x100280;
+
+/// GICR_SGI_ISACTIVER0: SGI/PPI激活
+const GICR_SGI_ISACTIVER0: u64 = 0x100300;
+
+/// GICR_SGI_ICACTIVER0: SGI/PPI激活
+const GICR_SGI_ICACTIVER0: u64 = 0x100380;
+
 // ============ 中断号定义 ============
 
 /// SGI中断号范围: 0-15
@@ -189,13 +201,13 @@ impl Gic500 {
             
             // 2. 清除所有SGI/PPI的待处理标志
             write_volatile(
-                (gicr_cpu_base + GICR_SGI_ICPENDR) as *mut u32,
+                (gicr_cpu_base + GICR_SGI_ICPENDR0) as *mut u32,
                 0xFFFFFFFF,
             );
             
             // 3. 清除所有SGI/PPI的激活标志
             write_volatile(
-                (gicr_cpu_base + GICR_SGI_ICACTIVER) as *mut u32,
+                (gicr_cpu_base + GICR_SGI_ICACTIVER0) as *mut u32,
                 0xFFFFFFFF,
             );
             

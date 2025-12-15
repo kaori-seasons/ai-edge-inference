@@ -76,7 +76,14 @@ impl QuantParam {
         let clamped = value.clamp(self.min_value, self.max_value);
         
         if symmetric {
-            ((clamped / self.scale).round() as i8).clamp(-128, 127)
+            let scaled = clamped / self.scale;
+            // Manual rounding: if scaled >= 0, add 0.5; if < 0, subtract 0.5
+            let rounded = if scaled >= 0.0 {
+                (scaled + 0.5) as i8
+            } else {
+                (scaled - 0.5) as i8
+            };
+            rounded.clamp(-128, 127)
         } else {
             let q = ((clamped / self.scale) as i8).wrapping_add(self.zero_point);
             q.clamp(-128, 127)
