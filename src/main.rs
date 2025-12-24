@@ -13,6 +13,10 @@ use starryos_rk3588::kernel::sched::hmp_scheduler::*;
 use starryos_rk3588::kernel::sched::npu_support::*;
 use starryos_rk3588::drivers::mipi_csi_driver::*;
 use starryos_rk3588::npu::*;
+use starryos_rk3588::println;  // 导入println宏
+use alloc::vec;  // 导入vec宏
+use starryos_rk3588::npu::rknn_binding_sys::RKNN_CTX;  // 导入RKNN_CTX
+use starryos_rk3588::npu::yolov8_quantized::YOLOV8_INT8_NANO;  // 导入YOLOV8_INT8_NANO
 
 /// 内核主程序入口 (由boot.s调用)
 /// 
@@ -503,6 +507,70 @@ pub extern "C" fn main(dtb_ptr: u64) -> ! {
         println!("[StarryOS]   • Throughput: 14-28 FPS");
         println!("[StarryOS]   • Memory Usage: <20MB");
         println!("[StarryOS]   • Power: <10W");
+    }
+    
+    // ============ 新增: ArcFace 人脸识别测试 ============
+    
+    println!("[StarryOS] \n================================");
+    println!("[StarryOS] ArcFace Recognition Test");
+    println!("[StarryOS] ================================");
+    
+    println!("[StarryOS] Initializing RKNN system for ArcFace...");
+    {
+        match init_rknn_system() {
+            Ok(_) => println!("[StarryOS] RKNN system initialized successfully"),
+            Err(e) => println!("[StarryOS] Failed to initialize RKNN system: {}", e),
+        }
+    }
+    
+    println!("[StarryOS] Testing ArcFace face recognition...");
+    {
+        let mut arcface_app = ArcFaceApp::new();
+        arcface_app.set_similarity_threshold(0.6);
+        
+        // 模拟两个人脸图像数据
+        let face1_data = alloc::vec![100u8; 112 * 112 * 3];
+        let face2_data = alloc::vec![120u8; 112 * 112 * 3];
+        
+        // 模拟特征提取输出 (512维特征向量)
+        let embedding1 = alloc::vec![0.1f32; 512];
+        let embedding2 = alloc::vec![0.15f32; 512];
+        
+        // 提取特征 (使用真实的NPU推理)
+        match arcface_app.extract_features(&face1_data, 112, 112, &[]) {
+            Ok(result) => {
+                println!("[StarryOS] Face 1 feature extraction PASSED");
+                println!("[StarryOS]   Inference time: {}ms", result.inference_time_ms);
+                println!("[StarryOS]   Process time: {}ms", result.process_time_ms);
+                println!("[StarryOS]   Embedding dimension: {}", result.embedding.len());
+            }
+            Err(e) => println!("[StarryOS] Face 1 feature extraction FAILED: {}", e),
+        }
+        
+        // 验证两个人脸是否属于同一个人
+        match arcface_app.verify_faces(&embedding1, &embedding2) {
+            Ok(result) => {
+                println!("[StarryOS] Face verification PASSED");
+                println!("[StarryOS]   Similarity: {:.4}", result.similarity);
+                println!("[StarryOS]   Match: {}", result.is_match);
+                println!("[StarryOS]   Process time: {}ms", result.process_time_ms);
+            }
+            Err(e) => println!("[StarryOS] Face verification FAILED: {}", e),
+        }
+        
+        // 人脸识别 (1:N匹配)
+        let gallery_embeddings = vec![embedding1.clone(), alloc::vec![0.2f32; 512]];
+        let gallery_ids = vec![1u32, 2u32];
+        
+        match arcface_app.identify_face(&embedding2, &gallery_embeddings, &gallery_ids) {
+            Ok(result) => {
+                println!("[StarryOS] Face identification PASSED");
+                println!("[StarryOS]   Matched ID: {}", result.matched_id);
+                println!("[StarryOS]   Similarity: {:.4}", result.similarity);
+                println!("[StarryOS]   Process time: {}ms", result.process_time_ms);
+            }
+            Err(e) => println!("[StarryOS] Face identification FAILED: {}", e),
+        }
     }
     
     println!("[StarryOS] \n================================");

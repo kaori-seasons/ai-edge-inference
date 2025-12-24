@@ -198,7 +198,7 @@ impl Tensor {
 
 /// RKNN 模型文件头结构
 #[derive(Debug)]
-struct RknnModelHeader {
+pub struct RknnModelHeader {
     /// 魔数 ("RKNN")
     magic: [u8; 4],
     /// 版本号 (主版本, 次版本, 修订版本)
@@ -221,7 +221,7 @@ struct RknnModelHeader {
 
 impl RknnModelHeader {
     /// 从二进制数据解析模型头
-    fn parse(data: &[u8]) -> Result<Self, &'static str> {
+    pub fn parse(data: &[u8]) -> Result<Self, &'static str> {
         if data.len() < 32 {
             return Err("Model data too small for header");
         }
@@ -337,6 +337,19 @@ pub struct RknnOutput {
     pub size: u32,
 }
 
+/// 模型类型枚举
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ModelType {
+    /// 目标检测模型 (如YOLOv8)
+    ObjectDetection,
+    /// 人脸识别模型 (如ArcFace)
+    FaceRecognition,
+    /// 图像分类模型
+    ImageClassification,
+    /// 语义分割模型
+    SemanticSegmentation,
+}
+
 /// RKNN 上下文 (RAII 包装)
 pub struct RknnCtx {
     ctx: RknnContext,
@@ -345,6 +358,7 @@ pub struct RknnCtx {
     is_initialized: bool,
     model_header: Option<RknnModelHeader>,
     model_loaded: bool,
+    model_type: ModelType,  // 新增: 模型类型标识
 }
 
 // Safety: RknnCtx can be safely sent between threads
@@ -375,7 +389,18 @@ impl RknnCtx {
             is_initialized: false,
             model_header: None,
             model_loaded: false,
+            model_type: ModelType::ObjectDetection,  // 默认为对象检测
         })
+    }
+    
+    /// 设置模型类型
+    pub fn set_model_type(&mut self, model_type: ModelType) {
+        self.model_type = model_type;
+    }
+    
+    /// 获取模型类型
+    pub fn model_type(&self) -> ModelType {
+        self.model_type
     }
     
     /// 加载 RKNN 模型
@@ -500,7 +525,7 @@ impl RknnCtx {
                 }
             }
             
-            // 汽流改造: 根据模型推断数据类型
+            // 根据模型类型推断数据类型
             let data_type = self.infer_input_data_type(i);
             let element_size = match data_type {
                 DataType::Float32 => 4,
@@ -595,14 +620,24 @@ impl RknnCtx {
         Ok(())
     }
     
-    /// 推断数据类型 (需要调用 RKNN API)
+    /// 推断输入数据类型
     fn infer_input_data_type(&self, _index: usize) -> DataType {
-        DataType::Float32  // 大多数 YOLO 模型使用 FP32
+        match self.model_type {
+            ModelType::ObjectDetection => DataType::Float32,  // YOLOv8 使用 FP32
+            ModelType::FaceRecognition => DataType::Float32,  // ArcFace 使用 FP32
+            ModelType::ImageClassification => DataType::Float32,  // 分类模型通常使用 FP32
+            ModelType::SemanticSegmentation => DataType::Float32,  // 分割模型通常使用 FP32
+        }
     }
     
     /// 推断输出数据类型
     fn infer_output_data_type(&self, _index: usize) -> DataType {
-        DataType::Float32
+        match self.model_type {
+            ModelType::ObjectDetection => DataType::Float32,
+            ModelType::FaceRecognition => DataType::Float32,
+            ModelType::ImageClassification => DataType::Float32,
+            ModelType::SemanticSegmentation => DataType::Float32,
+        }
     }
     
     /// 设置输入数据
@@ -856,5 +891,17 @@ mod tests {
         // 注意：在测试环境中，我们无法真正初始化RKNN系统
         // 这里只是测试函数是否能正常调用
         assert!(result.is_ok() || result.is_err());
+    }
+    
+    #[test]
+    fn test_model_type_functionality() {
+        let mut ctx = RknnCtx::new().unwrap();
+        
+        // 默认模型类型
+        assert_eq!(ctx.model_type(), ModelType::ObjectDetection);
+        
+        // 设置模型类型
+        ctx.set_model_type(ModelType::FaceRecognition);
+        assert_eq!(ctx.model_type(), ModelType::FaceRecognition);
     }
 }
