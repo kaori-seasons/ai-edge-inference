@@ -9,6 +9,8 @@
 
 use alloc::vec::Vec;
 use core::fmt;
+use alloc::format;
+use super::rknn_binding_sys::ModelType;
 
 // ============ 检测结果结构 ============
 
@@ -282,6 +284,11 @@ impl Yolov8App {
             ],
         }
     }
+    
+    /// 获取模型类型 (用于RKNN上下文配置)
+    pub fn model_type() -> ModelType {
+        ModelType::ObjectDetection
+    }
 }
 
 /// CAN 消息用于传输检测结果
@@ -319,5 +326,10 @@ mod tests {
         let display_str = format!("{}", detection);
         assert!(display_str.contains("Class: 0"));
         assert!(display_str.contains("0.95"));
+    }
+    
+    #[test]
+    fn test_model_type() {
+        assert_eq!(Yolov8App::model_type(), ModelType::ObjectDetection);
     }
 }
